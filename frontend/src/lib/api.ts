@@ -1,7 +1,7 @@
-﻿import { supabase } from './supabase';
+import { supabase } from './supabase';
 
 const viteEnv = typeof import.meta !== 'undefined' ? (import.meta as any).env : undefined;
-const API_BASE = (viteEnv?.VITE_API_BASE_URL || '').replace(/\/$/, '');
+export const API_BASE = (viteEnv?.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
 export async function fetchApi(endpoint: string, options: RequestInit = {}) {
   const { data } = await supabase.auth.getSession();

@@ -16,7 +16,19 @@ export async function fetchApi(endpoint: string, options: RequestInit = {}) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const requestUrl = API_BASE ? `${API_BASE}${endpoint}` : endpoint;
+  let requestUrl = endpoint;
+  if (API_BASE) {
+    const cleanBase = API_BASE.replace(/\/$/, '');
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+
+    if (cleanBase.endsWith('/api')) {
+      requestUrl = `${cleanBase}${cleanEndpoint.replace(/^\/api/, '')}`;
+    } else if (cleanEndpoint.startsWith('/api')) {
+      requestUrl = `${cleanBase}${cleanEndpoint}`;
+    } else {
+      requestUrl = `${cleanBase}/api${cleanEndpoint}`;
+    }
+  }
 
   const response = await fetch(requestUrl, {
     ...options,

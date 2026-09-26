@@ -240,7 +240,7 @@ export async function fetchClinicianCaseload(clinicianId: string): Promise<MockP
             prescription: stats.prescription,
             romHistory: stats.romHistory || [],
             sessionsHistory: stats.sessionsHistory || [],
-            angleDeviationData: [],
+            angleDeviationData: stats.angleDeviationData || [],
           });
         }
         if (caseload.length > 0) {

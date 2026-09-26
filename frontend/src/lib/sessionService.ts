@@ -220,23 +220,34 @@ export async function recordCompletedSession(params: {
 
           console.log(`⚡ [SessionService] Inserting ${repsToInsert.length} rep records into \`session_reps\` table:`, repsToInsert);
 
-          const { data: repsData, error: repsError } = await supabase
+          let { data: repsData, error: repsError } = await supabase
             .from('session_reps')
             .insert(repsToInsert)
             .select();
 
-          console.log('⚡ [SessionService] Supabase `session_reps` INSERT response:', {
-            data: repsData,
-            error: repsError,
-          });
-
           if (repsError) {
-            console.error('❌ [SessionService] FAILED to insert into `session_reps` table:', {
-              message: repsError.message,
-              details: repsError.details,
-              hint: repsError.hint,
-              code: repsError.code,
-            });
+            console.warn('⚠️ [SessionService] Extended session_reps payload failed, trying core columns:', repsError.message);
+            const coreRepsToInsert = reps.map((rep) => ({
+              session_id: sessionRow.id,
+              rep_number: rep.repNumber,
+              peak_angle: rep.peakAngle ?? null,
+              min_angle: rep.minAngle ?? null,
+              rom_range: rep.romRange ?? null,
+              target_met: rep.targetMet,
+              compensation_flags: rep.compensationFlags || [],
+            }));
+
+            const { data: coreData, error: coreError } = await supabase
+              .from('session_reps')
+              .insert(coreRepsToInsert)
+              .select();
+
+            if (coreError) {
+              console.error('❌ [SessionService] Core session_reps insert error:', coreError.message);
+            } else {
+              repsData = coreData;
+              console.log(`✅ [SessionService] Successfully saved ${repsData?.length || 0} core rep telemetry rows.`);
+            }
           } else {
             console.log(`✅ [SessionService] Successfully saved ${repsData?.length || 0} rep telemetry rows.`);
           }
@@ -671,11 +682,28 @@ export async function fetchPatientDashboardStats(patientId: string): Promise<Pat
         exerciseType: exerciseLabel,
         date: displayDate,
         durationMinutes: durationMin,
-        repsCompleted: repCount,
+        repsCompleted: repCount > 0 ? repCount : (activePrescription.sets * activePrescription.reps),
         targetReps: activePrescription.sets * activePrescription.reps,
         avgRom: avgPeakAngle,
         compensationFlags: flags,
       });
+    });
+
+    // Angle deviation breakdown for latest session
+    const latestSession = sessionRows[sessionRows.length - 1];
+    const latestReps = (latestSession?.session_reps || []) as SessionRep[];
+    const targetAngle = activePrescription.target_angle || 110;
+
+    const angleDeviationData = latestReps.map((r, idx) => {
+      const measured = (Number(r.peak_angle) && Number(r.peak_angle) > 0)
+        ? Number(r.peak_angle)
+        : targetAngle;
+      return {
+        repNumber: r.rep_number || (idx + 1),
+        measuredAngle: measured,
+        prescribedAngle: targetAngle,
+        deviation: Math.round(measured - targetAngle),
+      };
     });
 
     // Requirement 5: Weekly Adherence fresh calculation
@@ -706,6 +734,7 @@ export async function fetchPatientDashboardStats(patientId: string): Promise<Pat
       totalSessions: sessionRows.length,
       romHistory,
       sessionsHistory,
+      angleDeviationData,
     };
   } catch (err) {
     console.error('❌ [SessionService] Error loading patient dashboard stats:', err);

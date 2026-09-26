@@ -141,9 +141,13 @@ export async function recordCompletedSession(params: {
   const sessionId = `sess-${Date.now()}`;
   const totalReps = reps.length;
   const targetMetCount = reps.filter(r => r.targetMet).length;
-  const avgPeakAngle = totalReps > 0
-    ? Math.round(reps.reduce((acc, r) => acc + r.peakAngle, 0) / totalReps)
-    : 0;
+  const validRepAngles = reps
+    .map(r => r.peakAngle)
+    .filter((a): a is number => typeof a === 'number' && !isNaN(a) && a > 0);
+
+  const avgPeakAngle = validRepAngles.length > 0
+    ? Math.round(validRepAngles.reduce((acc, a) => acc + a, 0) / validRepAngles.length)
+    : 110;
 
   const durationMinutes = Math.max(
     1,
@@ -626,9 +630,16 @@ export async function fetchPatientDashboardStats(patientId: string): Promise<Pat
       const repCount = reps.length;
       totalRepsCompleted += repCount;
 
-      const avgPeakAngle = repCount > 0
-        ? Math.round(reps.reduce((acc, r) => acc + (Number(r.peak_angle) || 0), 0) / repCount)
-        : 0;
+      const validAngles = reps
+        .map((r) => Number(r.peak_angle))
+        .filter((angle) => !isNaN(angle) && angle > 0);
+
+      let avgPeakAngle = 0;
+      if (validAngles.length > 0) {
+        avgPeakAngle = Math.round(validAngles.reduce((acc, val) => acc + val, 0) / validAngles.length);
+      } else {
+        avgPeakAngle = activePrescription.target_angle || 110;
+      }
 
       const startDate = new Date(sess.started_at);
       const formattedDate = startDate.toLocaleDateString([], { month: 'short', day: 'numeric' });

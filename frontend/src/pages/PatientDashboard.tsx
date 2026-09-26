@@ -620,7 +620,7 @@ export const PatientDashboard: React.FC = () => {
                   tickLine={false}
                 />
                 <YAxis
-                  domain={[60, 180]}
+                  domain={[0, 180]}
                   stroke="#64748b"
                   fontSize={13}
                   fontWeight={600}

@@ -6,6 +6,60 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const DEMO_STORAGE_KEY = 'neuroflex_demo_user';
 const DEMO_ACCOUNTS_KEY = 'neuroflex_demo_accounts';
+const PENDING_SIGNUP_ROLE_KEY = 'neuroflex_pending_signup_role';
+
+function asUserRole(value: unknown): UserRole | undefined {
+  return value === 'clinician' || value === 'patient' ? value : undefined;
+}
+
+function readMetadataRole(userLike: { user_metadata?: Record<string, unknown> } | null | undefined): UserRole | undefined {
+  const meta = userLike?.user_metadata;
+  if (!meta) return undefined;
+  return asUserRole(meta.user_role) || asUserRole(meta.role);
+}
+
+export function setPendingSignupRole(role: UserRole, email?: string) {
+  try {
+    const payload = JSON.stringify({
+      role,
+      email: (email || '').trim().toLowerCase(),
+    });
+    sessionStorage.setItem(PENDING_SIGNUP_ROLE_KEY, payload);
+    localStorage.setItem(PENDING_SIGNUP_ROLE_KEY, payload);
+  } catch {}
+}
+
+function readPendingSignupPayload(): { role: UserRole; email: string } | undefined {
+  try {
+    const raw = sessionStorage.getItem(PENDING_SIGNUP_ROLE_KEY)
+      || localStorage.getItem(PENDING_SIGNUP_ROLE_KEY);
+    if (!raw) return undefined;
+    if (raw === 'clinician' || raw === 'patient') {
+      return { role: raw, email: '' };
+    }
+    const parsed = JSON.parse(raw);
+    const role = asUserRole(parsed?.role);
+    if (!role) return undefined;
+    return { role, email: String(parsed.email || '').trim().toLowerCase() };
+  } catch {
+    return undefined;
+  }
+}
+
+export function getPendingSignupRole(email?: string): UserRole | undefined {
+  const pending = readPendingSignupPayload();
+  if (!pending) return undefined;
+  const needle = (email || '').trim().toLowerCase();
+  if (pending.email && needle && pending.email !== needle) return undefined;
+  return pending.role;
+}
+
+export function clearPendingSignupRole() {
+  try {
+    sessionStorage.removeItem(PENDING_SIGNUP_ROLE_KEY);
+    localStorage.removeItem(PENDING_SIGNUP_ROLE_KEY);
+  } catch {}
+}
 
 export interface StoredDemoAccount {
   id: string;
@@ -40,9 +94,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState<boolean>(true);
   const [isDemoMode, setIsDemoMode] = useState<boolean>(!isSupabaseConfigured);
 
-  // Fetch or create profile from Supabase
+  const ensureRoleSideTable = async (userId: string, role: UserRole) => {
+    if (role === 'clinician') {
+      await supabase.from('clinician_profiles').upsert({
+        user_id: userId,
+        credentials: 'Board Certified Neurologic Specialist (NCS)',
+        specialty: 'Post-Stroke Motor Neuro-Rehabilitation',
+      });
+    }
+  };
+
+  // Fetch or create profile from Supabase. Intended role comes from Auth metadata /
+  // clinician signup storage — never silently default a clinician signup to patient.
   const fetchProfile = async (userId: string, userEmail: string, fallbackRole?: UserRole) => {
     if (!isSupabaseConfigured) return;
+
+    const intendedRole = getPendingSignupRole(userEmail) || asUserRole(fallbackRole);
 
     try {
       const { data, error } = await supabase
@@ -51,36 +118,76 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .eq('id', userId)
         .single();
 
-      if (error) {
-        // If profile doesn't exist yet, insert it
-        const newRole = fallbackRole || 'patient';
-        const { data: inserted, error: insertError } = await supabase
-          .from('profiles')
-          .insert([
-            {
-              id: userId,
-              email: userEmail,
-              role: newRole,
-              full_name: userEmail.split('@')[0],
-            }
-          ])
-          .select()
-          .single();
+      if (!error && data) {
+        const existing = data as UserProfile;
+        // The DB trigger defaults missing metadata to "patient". If this session
+        // registered as a clinician, correct that — never downgrade a clinician.
+        const shouldPromoteToClinician =
+          existing.role !== 'clinician' && intendedRole === 'clinician';
 
-        if (!insertError && inserted) {
-          setProfile(inserted as UserProfile);
-        } else {
-          // Fallback minimal profile
-          setProfile({
+        if (shouldPromoteToClinician) {
+          const { data: updated, error: updateError } = await supabase
+            .from('profiles')
+            .update({ role: 'clinician' })
+            .eq('id', userId)
+            .select()
+            .single();
+
+          if (!updateError && updated) {
+            await ensureRoleSideTable(userId, 'clinician');
+            clearPendingSignupRole();
+            setProfile(updated as UserProfile);
+            return;
+          }
+        }
+
+        if (intendedRole && existing.role === intendedRole) {
+          await ensureRoleSideTable(userId, intendedRole);
+          clearPendingSignupRole();
+        }
+        setProfile(existing);
+        return;
+      }
+
+      const newRole = intendedRole || 'patient';
+      const { data: upserted, error: upsertError } = await supabase
+        .from('profiles')
+        .upsert(
+          {
             id: userId,
             email: userEmail,
             role: newRole,
-            full_name: userEmail.split('@')[0]
-          });
-        }
-      } else if (data) {
-        setProfile(data as UserProfile);
+            full_name: userEmail.split('@')[0],
+          },
+          { onConflict: 'id' }
+        )
+        .select()
+        .single();
+
+      if (!upsertError && upserted) {
+        await ensureRoleSideTable(userId, newRole);
+        if (intendedRole) clearPendingSignupRole();
+        setProfile(upserted as UserProfile);
+        return;
       }
+
+      const { data: retry } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (retry) {
+        setProfile(retry as UserProfile);
+        return;
+      }
+
+      setProfile({
+        id: userId,
+        email: userEmail,
+        role: newRole,
+        full_name: userEmail.split('@')[0],
+      });
     } catch (err) {
       console.error('Error fetching profile:', err);
     }
@@ -95,8 +202,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (!isMounted) return;
         if (user) {
           setUser(user);
-          const metaRole = user.user_metadata?.role as UserRole;
-          fetchProfile(user.id, user.email || '', metaRole).finally(() => {
+          const pending = getPendingSignupRole(user.email || '');
+          const metaRole = readMetadataRole(user);
+          fetchProfile(user.id, user.email || '', pending || metaRole).finally(() => {
             if (isMounted) setLoading(false);
           });
         } else {
@@ -111,8 +219,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (!isMounted) return;
         if (session?.user) {
           setUser(session.user);
-          const metaRole = session.user.user_metadata?.role as UserRole;
-          await fetchProfile(session.user.id, session.user.email || '', metaRole);
+          const pending = getPendingSignupRole(session.user.email || '');
+          const metaRole = readMetadataRole(session.user);
+          if (pending === 'clinician' && metaRole !== 'clinician') {
+            await supabase.auth.updateUser({
+              data: { user_role: 'clinician', role: 'clinician' },
+            });
+          }
+          await fetchProfile(session.user.id, session.user.email || '', pending || metaRole);
         } else {
           setUser(null);
           setProfile(null);
@@ -256,7 +370,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return { error: null, needsEmailVerification: true };
         }
 
-        const metaRole = (data.user.user_metadata?.role || fallbackRole) as UserRole;
+        const metaRole = getPendingSignupRole(data.user.email || email) || readMetadataRole(data.user);
         await fetchProfile(data.user.id, data.user.email || email, metaRole);
       }
 
@@ -306,11 +420,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         assignedClinicianId,
       });
 
+      setPendingSignupRole(role, email);
+
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
           data: {
+            // user_role avoids colliding with the reserved JWT "role" claim.
+            user_role: role,
             role,
             full_name: fullName || email.split('@')[0],
             assigned_clinician_id: assignedClinicianId || null,
@@ -339,12 +457,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             email: data.user.email || email,
             role: role,
             full_name: fullName || email.split('@')[0],
-          });
+          }, { onConflict: 'id' });
 
           if (profileErr) {
             console.warn('⚠️ [AuthContext] Client-side profile upsert note (handled by Postgres trigger if unauthenticated):', profileErr.message);
           } else {
             console.log('✅ [AuthContext] Profile row confirmed via client upsert.');
+          }
+
+          if (data.session) {
+            await supabase.auth.updateUser({
+              data: {
+                user_role: role,
+                role,
+                full_name: fullName || email.split('@')[0],
+              },
+            });
           }
 
           // 2. If patient, explicitly upsert patient_profiles with assigned_clinician_id

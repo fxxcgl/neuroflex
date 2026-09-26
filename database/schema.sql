@@ -461,7 +461,14 @@ DECLARE
   raw_clinician_id TEXT;
   assigned_id UUID;
 BEGIN
-  user_role := COALESCE(NEW.raw_user_meta_data->>'role', 'patient');
+  user_role := COALESCE(
+    NULLIF(NEW.raw_user_meta_data->>'user_role', ''),
+    NULLIF(NEW.raw_user_meta_data->>'role', ''),
+    'patient'
+  );
+  IF user_role NOT IN ('patient', 'clinician') THEN
+    user_role := 'patient';
+  END IF;
   user_name := COALESCE(NEW.raw_user_meta_data->>'full_name', split_part(NEW.email, '@', 1));
   raw_clinician_id := NEW.raw_user_meta_data->>'assigned_clinician_id';
 
@@ -471,7 +478,10 @@ BEGIN
   ON CONFLICT (id) DO UPDATE
   SET
     email = COALESCE(EXCLUDED.email, public.profiles.email),
-    role = COALESCE(EXCLUDED.role, public.profiles.role),
+    role = CASE
+      WHEN EXCLUDED.role = 'clinician' OR public.profiles.role = 'clinician' THEN 'clinician'
+      ELSE COALESCE(EXCLUDED.role, public.profiles.role)
+    END,
     full_name = COALESCE(EXCLUDED.full_name, public.profiles.full_name);
 
   -- 2. Insert into respective profile table

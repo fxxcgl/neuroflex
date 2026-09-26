@@ -102,7 +102,10 @@ export const VerifyEmailPage: React.FC = () => {
 
       if (refreshedUser.email_confirmed_at) {
         // User is verified!
-        const role = profile?.role || (refreshedUser.user_metadata?.role as string) || 'patient';
+        const role = profile?.role
+          || (refreshedUser.user_metadata?.user_role as string)
+          || (refreshedUser.user_metadata?.role as string)
+          || 'patient';
         navigate(role === 'clinician' ? '/clinician/dashboard' : '/patient/onboarding', { replace: true });
       } else {
         setCheckError('Your email is not verified yet. Please click the link sent to your inbox, or request a new one below.');

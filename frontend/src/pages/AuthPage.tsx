@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, setPendingSignupRole } from '../context/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
 import { fetchAvailableClinicians, type ClinicianOption } from '../lib/clinicianService';
@@ -63,8 +63,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login' }) => 
     });
   }, []);
 
-  // If already logged in, automatically redirect to appropriate dashboard (only if verified)
+  // If already logged in, automatically redirect to the role stored on the profile
   useEffect(() => {
+    if (signupVerificationPending) return;
     if (user && !user.email_confirmed_at) {
       navigate('/verify-email', { state: { email: user.email }, replace: true });
       return;
@@ -76,7 +77,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login' }) => 
         navigate('/patient/dashboard', { replace: true });
       }
     }
-  }, [user, profile, navigate]);
+  }, [user, profile, navigate, signupVerificationPending]);
 
   useEffect(() => {
     if (paramRole === 'clinician' || paramRole === 'patient') {
@@ -128,6 +129,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login' }) => 
 
     if (mode === 'signup') {
       const assignedId = role === 'patient' ? (selectedClinicianId || (clinicians[0]?.id)) : undefined;
+      setPendingSignupRole(role, email.trim());
       const res = await signUp(email.trim(), password, role, fullName.trim() || undefined, assignedId);
       
       if (res.error) {
@@ -155,7 +157,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login' }) => 
       } else {
         setSuccessMsg('Logged in successfully! Redirecting...');
         setTimeout(() => {
-          navigate(role === 'clinician' ? '/clinician/dashboard' : '/patient/dashboard');
+          const resolvedRole = profile?.role || role;
+          navigate(resolvedRole === 'clinician' ? '/clinician/dashboard' : '/patient/dashboard');
         }, 600);
       }
     }
@@ -176,6 +179,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login' }) => 
     }
 
     setLoading(true);
+    setPendingSignupRole(role, email.trim() || undefined);
     const redirectPath = role === 'clinician' ? '/clinician/dashboard' : '/patient/dashboard';
 
     const { error } = await supabase.auth.signInWithOAuth({

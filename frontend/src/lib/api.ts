@@ -1,6 +1,7 @@
-import { supabase } from './supabase';
+﻿import { supabase } from './supabase';
 
-const API_BASE = 'http://localhost:8000/api';
+const viteEnv = typeof import.meta !== 'undefined' ? (import.meta as any).env : undefined;
+const API_BASE = (viteEnv?.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
 export async function fetchApi(endpoint: string, options: RequestInit = {}) {
   const { data } = await supabase.auth.getSession();
@@ -15,7 +16,9 @@ export async function fetchApi(endpoint: string, options: RequestInit = {}) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_BASE}${endpoint}`, {
+  const requestUrl = API_BASE ? `${API_BASE}${endpoint}` : endpoint;
+
+  const response = await fetch(requestUrl, {
     ...options,
     headers,
   });

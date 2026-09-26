@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTranslation } from 'react-i18next';
@@ -127,6 +127,7 @@ export const ExerciseSessionPage:React.FC=()=>{
   const gaitTrackerRef=useRef(createGaitTracker());
   const[isSummaryOpen,setIsSummaryOpen]=useState(false);const[sessionStartTime]=useState(Date.now());
   const lastFrameTime=useRef(performance.now());const frameCount=useRef(0);const lastVideoTime=useRef(-1);
+  const activeSideRef=useRef<'left'|'right'|null>(null);const smoothedAngleRef=useRef<number>(0);
 
   const getThresholdsForExercise=useCallback((ex:ExerciseType)=>{
     const cfg=getExerciseConfig(ex);if(!cfg.angleRep)return{rest:90,peak:165,target:160,tolerance:10,peakIsHigher:true};
@@ -139,6 +140,7 @@ export const ExerciseSessionPage:React.FC=()=>{
     thresholdsRef.current=getThresholdsForExercise(ex);
     repPhaseRef.current='REST';setRepPhaseState('REST');setRepCount(0);repLogsRef.current=[];setRepLogs([]);
     currentRepPeakAngle.current=0;currentRepMinAngle.current=999;peakHoldFramesRef.current=0;reachedPeakRef.current=false;
+    activeSideRef.current=null;smoothedAngleRef.current=0;
     setTrajectoryCount(0);setStabilityScore(null);setHoldSeconds(0);setGaitCadence(null);
     ankleCircleTrackerRef.current.reset();balanceHoldTrackerRef.current.reset();gaitTrackerRef.current.reset();
     setFormFeedback({message:`Switched to ${cfg.label}. Get in position.`,type:'info'});
@@ -169,10 +171,15 @@ export const ExerciseSessionPage:React.FC=()=>{
     const th=thresholdsRef.current;
     const lLms=arCfg.landmarks.left.map(i=>landmarks[i]);const rLms=arCfg.landmarks.right.map(i=>landmarks[i]);
     const lVis=Math.min(...lLms.map(l=>l?.visibility??0));const rVis=Math.min(...rLms.map(l=>l?.visibility??0));
-    const usedLms=lVis>=rVis?lLms:rLms;const sideName=lVis>=rVis?'Left':'Right';
+    if(!activeSideRef.current){activeSideRef.current=lVis>=rVis?'left':'right';}
+    else if(activeSideRef.current==='left'&&rVis>lVis+0.15&&rVis>0.45){activeSideRef.current='right';}
+    else if(activeSideRef.current==='right'&&lVis>rVis+0.15&&lVis>0.45){activeSideRef.current='left';}
+    const useLeft=activeSideRef.current==='left';const usedLms=useLeft?lLms:rLms;const sideName=useLeft?'Left':'Right';
     if(!usedLms[0]||!usedLms[1]||!usedLms[2]||Math.min(lVis,rVis)<0.15)return;
     const[la,lb,lc]=usedLms;
-    const mA=calculateAngle({x:la.x*canvas.width,y:la.y*canvas.height},{x:lb.x*canvas.width,y:lb.y*canvas.height},{x:lc.x*canvas.width,y:lc.y*canvas.height});
+    const rawA=calculateAngle({x:la.x*canvas.width,y:la.y*canvas.height},{x:lb.x*canvas.width,y:lb.y*canvas.height},{x:lc.x*canvas.width,y:lc.y*canvas.height});
+    const mA=smoothedAngleRef.current===0?rawA:Math.round(smoothedAngleRef.current*0.55+rawA*0.45);
+    smoothedAngleRef.current=mA;
     setCurrentAngle(mA);
     const colors:Record<string,string>={knee_extension:'#f59e0b',shoulder_raise:'#0284c7',straight_leg_raise:'#a855f7',heel_slides:'#10b981',mini_squats:'#f97316',sit_to_stand:'#6366f1',calf_raises:'#ec4899',ankle_pumps:'#06b6d4'};
     const color=colors[exerciseType]??'#38bdf8';

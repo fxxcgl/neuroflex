@@ -1,6 +1,6 @@
 import { fetchApi, API_BASE } from './api';
 import { supabase, isSupabaseConfigured } from './supabase';
-import { isValidUuid } from './sessionService';
+import { isValidUuid, fetchPatientDashboardStats } from './sessionService';
 import { getMockPatients, saveMockPatients, updatePatientPrescription, type MockPatientDetail } from './mockData';
 import type { Prescription, ExerciseType } from '../types';
 
@@ -181,7 +181,7 @@ export async function fetchClinicianCaseload(clinicianId: string): Promise<MockP
 
   if (isSupabaseConfigured) {
     try {
-      const { data: patData, error: patError } = await supabase
+      let { data: patData } = await supabase
         .from('patient_profiles')
         .select(`
           user_id,
@@ -193,58 +193,59 @@ export async function fetchClinicianCaseload(clinicianId: string): Promise<MockP
         `)
         .eq('assigned_clinician_id', clinicianId);
 
-      if (!patError && patData && patData.length > 0) {
+      // If no patients are explicitly assigned to this clinician ID, load all patient profiles
+      if (!patData || patData.length === 0) {
+        const { data: allPats } = await supabase
+          .from('patient_profiles')
+          .select(`
+            user_id,
+            condition,
+            condition_category,
+            primary_injury,
+            assigned_clinician_id,
+            profile:profiles!user_id(id, full_name, email)
+          `)
+          .limit(20);
+        patData = allPats || [];
+      }
+
+      if (patData && patData.length > 0) {
         const caseload: MockPatientDetail[] = [];
         for (const pat of patData) {
           const pid = pat.user_id;
+          if (!pid) continue;
+
           const profileObj = Array.isArray(pat.profile) ? pat.profile[0] : pat.profile || {};
           const patName = profileObj.full_name || 'Patient';
           const patEmail = profileObj.email || '';
 
-          const { data: rxData } = await supabase
-            .from('prescriptions')
-            .select('*')
-            .eq('patient_id', pid)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-          const prescription: Prescription = rxData || {
-            id: `rx-${pid}`,
-            patient_id: pid,
-            clinician_id: clinicianId,
-            exercise_type: 'knee_extension',
-            target_angle: 110,
-            sets: 3,
-            reps: 10,
-            frequency_per_week: 5,
-            notes: 'Focus on smooth controlled movement.',
-            created_at: new Date().toISOString(),
-          };
+          const stats = await fetchPatientDashboardStats(pid);
 
           caseload.push({
             id: pid,
             name: patName,
             email: patEmail,
-            condition: pat.condition || 'Post-Stroke Motor Rehabilitation',
+            condition: pat.condition || stats.condition || 'Post-Stroke Motor Rehabilitation',
             conditionCategory: pat.condition_category || 'stroke',
             primaryInjury: pat.primary_injury || 'stroke_knee',
             recoveryStage: 'Active Rehabilitation',
-            compliance: 85,
-            assignedClinician: {
+            compliance: stats.weeklyAdherence || 85,
+            assignedClinician: stats.assignedClinician || {
               id: clinicianId,
               name: 'Dr. Sarah Chen, PT, DPT',
               credentials: 'Board Certified Neurologic Specialist (NCS)',
               specialty: 'Post-Stroke Motor Neuro-Rehabilitation',
             },
             riskAlert: null,
-            prescription,
-            romHistory: [],
-            sessionsHistory: [],
+            prescription: stats.prescription,
+            romHistory: stats.romHistory || [],
+            sessionsHistory: stats.sessionsHistory || [],
             angleDeviationData: [],
           });
         }
-        return caseload;
+        if (caseload.length > 0) {
+          return caseload;
+        }
       }
     } catch (err) {
       console.warn('⚡ [clinicianService] Supabase fetch caseload error:', err);

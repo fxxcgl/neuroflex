@@ -69,6 +69,9 @@ export interface PatientDashboardStats {
   }[];
 }
 
+const ONBOARDING_INJURY_KEY = 'neuroflex_primary_injury';
+const ONBOARDING_CATEGORY_KEY = 'neuroflex_condition_category';
+
 const LAST_SESSION_SUMMARY_KEY = 'neuroflex_last_completed_session';
 
 export function isValidUuid(id?: string | null): boolean {
@@ -539,6 +542,21 @@ export async function fetchPatientDashboardStats(patientId: string): Promise<Pat
           credentials: 'Board Certified Neurologic Specialist (NCS)',
           specialty: 'Post-Stroke Motor Neuro-Rehabilitation',
         };
+      }
+    }
+
+    // Backward compatibility: if DB row exists but newer onboarding columns are missing,
+    // recover from onboarding cache so the user is not bounced back to onboarding.
+    if (!primaryInjury) {
+      const cachedInjury = localStorage.getItem(ONBOARDING_INJURY_KEY);
+      if (cachedInjury) {
+        primaryInjury = cachedInjury;
+      }
+    }
+    if (!conditionCategory) {
+      const cachedCategory = localStorage.getItem(ONBOARDING_CATEGORY_KEY);
+      if (cachedCategory) {
+        conditionCategory = cachedCategory;
       }
     }
 

@@ -26,8 +26,32 @@ CREATE TABLE IF NOT EXISTS public.patient_profiles (
   user_id UUID PRIMARY KEY REFERENCES public.profiles(id) ON DELETE CASCADE,
   date_of_birth DATE,
   condition TEXT,
+  condition_category TEXT CHECK (condition_category IN ('stroke', 'orthopedic', 'sports_injury', 'post_surgery')),
+  primary_injury TEXT CHECK (primary_injury IN (
+    'stroke_knee',
+    'stroke_shoulder',
+    'ortho_knee_pain',
+    'ortho_ankle_injury',
+    'sports_ankle_twist',
+    'sports_leg_raise',
+    'post_surgery_knee'
+  )),
   assigned_clinician_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL
 );
+
+-- Backfill/compatibility for existing projects created before onboarding columns were added.
+ALTER TABLE public.patient_profiles
+  ADD COLUMN IF NOT EXISTS condition_category TEXT CHECK (condition_category IN ('stroke', 'orthopedic', 'sports_injury', 'post_surgery'));
+ALTER TABLE public.patient_profiles
+  ADD COLUMN IF NOT EXISTS primary_injury TEXT CHECK (primary_injury IN (
+    'stroke_knee',
+    'stroke_shoulder',
+    'ortho_knee_pain',
+    'ortho_ankle_injury',
+    'sports_ankle_twist',
+    'sports_leg_raise',
+    'post_surgery_knee'
+  ));
 
 -- ------------------------------------------------------------------------------
 -- 3. CLINICIAN_PROFILES Table
@@ -539,4 +563,3 @@ ALTER TABLE public.used_transactions ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "pending_payments_all" ON public.pending_payments FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "used_transactions_all" ON public.used_transactions FOR ALL USING (true) WITH CHECK (true);
-

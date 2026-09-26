@@ -64,7 +64,7 @@ export const PatientOnboarding: React.FC = () => {
       // 2. Persist to database if Supabase configured
       const targetUid = user?.id || profile?.id;
       if (isSupabaseConfigured && targetUid) {
-        await supabase.from('patient_profiles').upsert(
+        const { error: profileSaveError } = await supabase.from('patient_profiles').upsert(
           {
             user_id: targetUid,
             condition_category: categoryToSave,
@@ -73,6 +73,23 @@ export const PatientOnboarding: React.FC = () => {
           },
           { onConflict: 'user_id' }
         );
+
+        // Backward-compatibility fallback for databases missing new onboarding columns.
+        if (profileSaveError && (profileSaveError.message.includes('condition_category') || profileSaveError.message.includes('primary_injury'))) {
+          const { error: legacySaveError } = await supabase.from('patient_profiles').upsert(
+            {
+              user_id: targetUid,
+              condition: config.clinicalLabel,
+            },
+            { onConflict: 'user_id' }
+          );
+
+          if (legacySaveError) {
+            throw legacySaveError;
+          }
+        } else if (profileSaveError) {
+          throw profileSaveError;
+        }
       }
     } catch (err) {
       console.error('Failed to persist onboarding injury:', err);

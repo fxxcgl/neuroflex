@@ -166,6 +166,31 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login' }) => 
     navigate(demoRole === 'clinician' ? '/clinician/dashboard' : '/patient/dashboard');
   };
 
+  const handleGoogleOAuth = async () => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    if (!isSupabaseConfigured) {
+      setErrorMsg('Google sign-in is available only when Supabase is configured.');
+      return;
+    }
+
+    setLoading(true);
+    const redirectPath = role === 'clinician' ? '/clinician/dashboard' : '/patient/dashboard';
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}${redirectPath}`,
+      },
+    });
+
+    if (error) {
+      setErrorMsg(error.message || 'Google sign-in failed. Please try again.');
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-[calc(100vh-80px)] flex items-center justify-center p-4 sm:p-6 lg:p-8">
       <div className="w-full max-w-lg bg-white rounded-3xl border-2 border-slate-200 shadow-xl overflow-hidden">
@@ -196,7 +221,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login' }) => 
               <div className="space-y-3 text-sm text-slate-600 leading-relaxed">
                 <p className="flex items-start gap-2.5">
                   <CheckCircle2 className="w-5 h-5 text-teal-600 shrink-0 mt-0.5" />
-                  <span>We’ve dispatched a confirmation link to your inbox. Click the link to verify your account.</span>
+                  <span>Weâ€™ve dispatched a confirmation link to your inbox. Click the link to verify your account.</span>
                 </p>
                 <p className="flex items-start gap-2.5">
                   <CheckCircle2 className="w-5 h-5 text-teal-600 shrink-0 mt-0.5" />
@@ -352,7 +377,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login' }) => 
                     onClick={() => navigate('/verify-email', { state: { email: email.trim() } })}
                     className="mt-2 text-xs font-black text-red-700 underline hover:text-red-900 block cursor-pointer"
                   >
-                    Click here to verify your email address →
+                    Click here to verify your email address â†’
                   </button>
                 )}
               </div>
@@ -421,7 +446,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login' }) => 
                     ) : (
                       clinicians.map((c) => (
                         <option key={c.id} value={c.id}>
-                          {c.name} — {c.credentials} ({c.specialty})
+                          {c.name} â€” {c.credentials} ({c.specialty})
                         </option>
                       ))
                     )}
@@ -476,7 +501,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login' }) => 
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••••••"
+                  placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                   className="w-full min-h-[52px] pl-12 pr-12 bg-slate-50 border-2 border-slate-300 rounded-2xl text-slate-900 text-base font-medium focus:bg-white focus:border-teal-600 focus:outline-none transition-all placeholder:text-slate-400"
                 />
                 <button
@@ -514,6 +539,25 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login' }) => 
                 )}
               </button>
             </div>
+
+            <div className="relative py-2">
+              <div className="absolute inset-0 flex items-center" aria-hidden="true">
+                <div className="w-full border-t border-slate-200" />
+              </div>
+              <div className="relative flex justify-center">
+                <span className="bg-white px-3 text-xs font-bold uppercase tracking-wider text-slate-500">or</span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleGoogleOAuth}
+              disabled={loading}
+              className="w-full min-h-[52px] rounded-2xl border-2 border-slate-300 bg-white hover:bg-slate-50 text-slate-900 font-bold text-sm transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
+              <span>Continue with Google</span>
+            </button>
 
           </form>
 
